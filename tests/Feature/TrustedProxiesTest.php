@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use Illuminate\Http\Request;
 use Tests\TestCase;
 
 class TrustedProxiesTest extends TestCase
@@ -16,16 +15,23 @@ class TrustedProxiesTest extends TestCase
 
     public function test_forwarded_proto_is_trusted_when_configured(): void
     {
-        putenv('TRUSTED_PROXIES=*');
-        $this->refreshApplication();
+        config(['trustedproxy.proxies' => '*']);
 
-        try {
-            $this->get('/up', ['X-Forwarded-Proto' => 'https'])->assertOk();
+        $this->get('/up', ['X-Forwarded-Proto' => 'https'])->assertOk();
 
-            $this->assertTrue(request()->isSecure());
-        } finally {
-            putenv('TRUSTED_PROXIES');
-            Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
+        $this->assertTrue(request()->isSecure());
+    }
+
+    public function test_env_value_is_parsed(): void
+    {
+        foreach (['*' => '*', '10.0.0.1, 10.0.0.2' => ['10.0.0.1', '10.0.0.2'], '' => null] as $env => $expected) {
+            putenv("TRUSTED_PROXIES={$env}");
+            $_ENV['TRUSTED_PROXIES'] = $_SERVER['TRUSTED_PROXIES'] = $env;
+
+            $this->assertSame($expected, (require config_path('trustedproxy.php'))['proxies']);
         }
+
+        putenv('TRUSTED_PROXIES');
+        unset($_ENV['TRUSTED_PROXIES'], $_SERVER['TRUSTED_PROXIES']);
     }
 }
