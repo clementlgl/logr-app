@@ -6,6 +6,7 @@ use App\Models\Beer;
 use App\Models\Checkin;
 use App\Models\Collection;
 use App\Models\Inventory;
+use App\Services\OpenFoodFacts;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -43,6 +44,20 @@ class BeerIndex extends Component
         'sortDirection' => ['except' => 'desc'],
         'filter' => ['except' => 'all'],
     ];
+
+    public function scanBarcode(string $code): void
+    {
+        $barcode = OpenFoodFacts::normalizeBarcode($code);
+        if (! $barcode) {
+            $this->dispatch('toast', message: 'Not a valid barcode.', type: 'error');
+
+            return;
+        }
+
+        $beer = Beer::where('barcode', $barcode)->first();
+
+        $this->redirect($beer ? route('beers.show', $beer) : route('beers.create', ['barcode' => $barcode]), navigate: true);
+    }
 
     public function updatingSearch(): void
     {

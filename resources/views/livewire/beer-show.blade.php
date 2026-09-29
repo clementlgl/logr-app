@@ -88,6 +88,12 @@
                     @if($beer->brewer_master)
                         <div class="{{ $tagClass }}">{{ $beer->brewer_master }}</div>
                     @endif
+                    @if($beer->barcode)
+                        <div class="inline-flex items-center gap-1.5 {{ $tagClass }}">
+                            <x-icon name="barcode" size="4" />
+                            {{ $beer->barcode }}
+                        </div>
+                    @endif
                     @if($averageRating > 0)
                         <div class="{{ $tagClass }}">
                             {{ number_format($averageRating, 1) }} ★ ({{ $totalCheckins }} {{ Str::plural('check-in', $totalCheckins) }})

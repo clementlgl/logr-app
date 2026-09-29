@@ -12,9 +12,13 @@ use App\Models\Store;
 use App\Models\Venue;
 use App\Services\CatalogBeer;
 use App\Services\OpenBreweryDb;
+use App\Services\OpenFoodFacts;
 use App\Services\PubBeerDb;
 use App\Services\Untappd;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -46,6 +50,13 @@ class BeerForm extends Component
     public string $description = '';
 
     public $photo;
+
+    // Barcode (EAN/UPC) + Open Food Facts lookup
+    public string $barcode = '';
+
+    public ?string $barcodeImageUrl = null;
+
+    public string $barcodeStatus = '';
 
     // Inventory (add form only)
     public bool $addToInventory = false;
@@ -112,6 +123,9 @@ class BeerForm extends Component
             $this->release_year = $beer->release_year;
             $this->brewer_master = $beer->brewer_master ?? '';
             $this->description = $beer->description ?? '';
+            $this->barcode = $beer->barcode ?? '';
+        } elseif ($barcode = request()->query('barcode')) {
+            $this->scanBarcode((string) $barcode);
         }
 
         $this->shareTargets = CheckinForm::buildTargetsForType('publish_checkins');
@@ -322,6 +336,114 @@ class BeerForm extends Component
         $this->showBeerDropdown = false;
     }
 
+    // -- Barcode --
+
+    public function scanBarcode(string $code): void
+    {
+        $this->barcode = $code;
+        $this->lookupBarcode();
+    }
+
+    public function lookupBarcode(): void
+    {
+        $this->resetErrorBag('barcode');
+        $this->barcodeStatus = '';
+
+        $barcode = OpenFoodFacts::normalizeBarcode($this->barcode);
+        if (! $barcode) {
+            $this->addError('barcode', 'Not a valid barcode (8 to 14 digits).');
+
+            return;
+        }
+        $this->barcode = $barcode;
+
+        $existing = Beer::where('barcode', $barcode)
+            ->when($this->beer?->exists, fn ($q) => $q->whereKeyNot($this->beer->id))
+            ->first();
+
+        if ($existing) {
+            if ($this->beer?->exists) {
+                $this->addError('barcode', "Barcode already used by {$existing->name}.");
+
+                return;
+            }
+
+            session()->flash('message', 'This beer is already in your library.');
+            $this->redirect(route('beers.show', $existing), navigate: true);
+
+            return;
+        }
+
+        $product = app(OpenFoodFacts::class)->lookup($barcode);
+        if (! $product) {
+            $this->barcodeStatus = 'Not found on Open Food Facts. Fill in the details manually.';
+
+            return;
+        }
+
+        // Only fill empty fields so a lookup never overwrites what the user typed
+        if ($this->name === '') {
+            $this->name = $product['name'];
+        }
+        if ($this->abv === null && $product['abv'] !== null) {
+            $this->abv = $product['abv'];
+        }
+        if ($this->style === [] && $product['style']) {
+            $this->style = $this->parseApiStyle($product['style']);
+        }
+        if ($this->description === '' && $product['description']) {
+            $this->description = $product['description'];
+        }
+        if (! $this->brewery_id && $product['brewery_name']) {
+            $brewery = Brewery::where('name', 'like', $product['brewery_name'])->first()
+                ?? Brewery::create(['name' => $product['brewery_name']]);
+            $this->brewery_id = $brewery->id;
+            $this->brewerySearch = $brewery->name;
+        }
+        if (! $this->beer?->photo_path) {
+            $this->barcodeImageUrl = $product['image_url'];
+        }
+
+        $this->showBeerDropdown = false;
+        $this->barcodeStatus = 'Filled from Open Food Facts. Check the details before saving.';
+    }
+
+    public function clearBarcode(): void
+    {
+        $this->barcode = '';
+        $this->barcodeImageUrl = null;
+        $this->barcodeStatus = '';
+        $this->resetErrorBag('barcode');
+    }
+
+    /**
+     * Download the Open Food Facts front image. Host is checked because the URL is a client-side property.
+     */
+    private function storeBarcodeImage(): ?string
+    {
+        $url = $this->barcodeImageUrl;
+        if (! $url || parse_url($url, PHP_URL_SCHEME) !== 'https' || parse_url($url, PHP_URL_HOST) !== 'images.openfoodfacts.org') {
+            return null;
+        }
+
+        try {
+            $response = Http::withHeaders(['User-Agent' => config('logr.user_agent')])->timeout(10)->get($url);
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        $type = $response->header('Content-Type');
+        if ($response->failed() || ! in_array($type, ['image/jpeg', 'image/png', 'image/webp'])) {
+            return null;
+        }
+
+        $ext = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$type];
+        $path = 'beers/'.uniqid('off_').'.'.$ext;
+        Storage::disk('public')->put($path, $response->body());
+
+        return $path;
+    }
+
     // -- Brewery search (Open Brewery DB) --
 
     public function updatedBrewerySearch(): void
@@ -461,9 +583,15 @@ class BeerForm extends Component
             'brewer_master' => 'nullable|string|max:255',
             'description' => 'nullable|string|max:5000',
             'photo' => 'nullable|image|max:10240',
+            'barcode' => ['nullable', 'regex:/^\d{8,14}$/', Rule::unique('beers', 'barcode')->ignore($this->beer?->id)],
         ];
 
-        $validated = $this->validate($rules);
+        $this->barcode = OpenFoodFacts::normalizeBarcode($this->barcode) ?? trim($this->barcode);
+
+        $validated = $this->validate($rules, [
+            'barcode.regex' => 'Not a valid barcode (8 to 14 digits).',
+            'barcode.unique' => 'Another beer already has this barcode.',
+        ]);
 
         $data = [
             'name' => $validated['name'],
@@ -474,10 +602,13 @@ class BeerForm extends Component
             'release_year' => $validated['release_year'],
             'brewer_master' => $validated['brewer_master'] ?: null,
             'description' => $validated['description'] ?: null,
+            'barcode' => ($validated['barcode'] ?? '') ?: null,
         ];
 
         if ($this->photo) {
             $data['photo_path'] = $this->photo->store('beers', 'public');
+        } elseif (! $this->beer?->photo_path && ($offPhoto = $this->storeBarcodeImage())) {
+            $data['photo_path'] = $offPhoto;
         }
 
         if ($this->beer) {

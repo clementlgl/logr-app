@@ -6,6 +6,7 @@
         'catalog' => 'Catalog.beer',
         'untappd' => 'Untappd',
         'openbrewerydb' => 'Open Brewery DB',
+        'openfoodfacts' => 'Open Food Facts',
     ];
     $label = $labels[$source] ?? $source;
 @endphp

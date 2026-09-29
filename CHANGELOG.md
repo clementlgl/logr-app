@@ -4,6 +4,14 @@ All notable changes to Logr will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Barcode (EAN/UPC) field on beers, searchable from the beer library
+- Camera barcode scanner on the beer list and beer form (native BarcodeDetector, ZXing fallback for Safari/Firefox, manual entry when no camera)
+- Open Food Facts lookup to prefill name, brewery, ABV, style, description and photo from a scanned barcode
+- Scanning a barcode already in the library opens that beer directly
+
 ## [0.4.3] - 2026-05-22
 
 ### Changed

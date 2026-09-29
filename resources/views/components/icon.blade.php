@@ -24,6 +24,9 @@
         @case('arrow-left')
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/>
             @break
+        @case('barcode')
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 7.5V5.25A1.5 1.5 0 0 1 5.25 3.75H7.5m9 0h2.25a1.5 1.5 0 0 1 1.5 1.5V7.5m0 9v2.25a1.5 1.5 0 0 1-1.5 1.5H16.5m-9 0H5.25a1.5 1.5 0 0 1-1.5-1.5V16.5M7.5 8.25v7.5m3-7.5v7.5m2.25-7.5v7.5m3.75-7.5v7.5"/>
+            @break
         @case('x-mark')
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
             @break

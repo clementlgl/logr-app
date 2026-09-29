@@ -187,6 +187,7 @@ class JsonImportService
                     'name' => $name,
                     'pub_uuid' => $data['pub_uuid'] ?? null,
                     'catalog_beer_id' => $data['catalog_beer_id'] ?? null,
+                    'barcode' => $data['barcode'] ?? null,
                     'brewery_id' => $breweryId,
                     'style' => $data['style'] ?? null,
                     'abv' => $data['abv'] ?? null,
@@ -456,7 +457,7 @@ class JsonImportService
     private function backfillBeer(Beer $beer, array $data, ?int $breweryId): void
     {
         $updates = [];
-        foreach (['pub_uuid', 'catalog_beer_id', 'release_year', 'brewer_master', 'description'] as $field) {
+        foreach (['pub_uuid', 'catalog_beer_id', 'barcode', 'release_year', 'brewer_master', 'description'] as $field) {
             if (empty($beer->{$field}) && ! empty($data[$field])) {
                 $updates[$field] = $data[$field];
             }

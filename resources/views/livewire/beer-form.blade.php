@@ -8,6 +8,48 @@
 
         <form wire:submit="save" class="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 max-w-4xl mx-auto">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {{-- Barcode (scan or type, then look up on Open Food Facts) --}}
+                <div class="md:col-span-2">
+                    <label for="barcode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barcode</label>
+                    <div class="flex items-center gap-2">
+                        <div class="relative flex-1">
+                            <input
+                                wire:model="barcode"
+                                wire:keydown.enter.prevent="lookupBarcode"
+                                type="text"
+                                id="barcode"
+                                inputmode="numeric"
+                                autocomplete="off"
+                                class="w-full px-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white focus:ring-amber-500 focus:border-amber-500 {{ $barcode ? 'pr-8' : '' }}"
+                                placeholder="EAN / UPC, e.g. 3080216052885"
+                            />
+                            @if($barcode)
+                                <button type="button" wire:click="clearBarcode" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                    <x-icon name="x-mark" size="4" />
+                                </button>
+                            @endif
+                        </div>
+                        <button type="button" wire:click="lookupBarcode" class="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-900/30 dark:hover:text-amber-300 transition-colors whitespace-nowrap">
+                            <span wire:loading.remove wire:target="lookupBarcode,scanBarcode">Look up</span>
+                            <span wire:loading wire:target="lookupBarcode,scanBarcode">Looking up...</span>
+                        </button>
+                        <x-barcode-scanner />
+                    </div>
+                    @error('barcode') <p class="mt-1 text-sm text-red-500">{{ $message }}</p> @enderror
+                    @if($barcodeStatus)
+                        <p class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            {{ $barcodeStatus }}
+                            @if($barcodeImageUrl)<x-api-source-badge source="openfoodfacts" />@endif
+                        </p>
+                    @endif
+                    @if($barcodeImageUrl && ! $photo)
+                        <div class="mt-2 flex items-center gap-3">
+                            <img src="{{ $barcodeImageUrl }}" alt="" class="w-16 h-16 rounded object-cover" />
+                            <span class="text-xs text-gray-500 dark:text-gray-400">This photo will be used unless you upload your own.</span>
+                        </div>
+                    @endif
+                </div>
+
                 {{-- Name (with search dropdown on add form) --}}
                 <div x-data="{ open: @entangle('showBeerDropdown') }" @click.outside="open = false" class="relative md:col-span-2">
                     <div class="flex items-end gap-2">

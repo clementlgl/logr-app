@@ -14,7 +14,7 @@ class Beer extends Model
 {
     protected $fillable = [
         'name', 'brewery_id', 'style', 'abv', 'ibu', 'release_year', 'brewer_master', 'description', 'photo_path', 'is_favorite',
-        'catalog_beer_id', 'pub_uuid', 'data',
+        'catalog_beer_id', 'pub_uuid', 'barcode', 'data',
     ];
 
     protected $casts = [
@@ -52,6 +52,7 @@ class Beer extends Model
     {
         return $query->where(function ($q) use ($search) {
             $q->where('name', 'like', "%{$search}%")
+                ->orWhere('barcode', trim($search))
                 ->orWhereHas('brewery', fn ($b) => $b->where('name', 'like', "%{$search}%"));
         });
     }

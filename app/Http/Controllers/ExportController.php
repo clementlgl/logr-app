@@ -101,6 +101,7 @@ class ExportController extends Controller
                 'name' => $beer->name,
                 'pub_uuid' => $beer->pub_uuid,
                 'catalog_beer_id' => $beer->catalog_beer_id,
+                'barcode' => $beer->barcode,
                 'brewery_name' => $beer->brewery->name ?? null,
                 'brewery_pub_uuid' => $beer->brewery->pub_uuid ?? null,
                 'style' => $beer->style,

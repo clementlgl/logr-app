@@ -12,7 +12,10 @@
 
             {{-- Search & Filters (right-aligned) --}}
             <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:ml-auto w-full sm:w-auto">
-                <x-search-input wire:model.live.debounce.300ms="search" placeholder="Search beers or breweries..." />
+                <div class="flex items-center gap-2">
+                    <x-search-input wire:model.live.debounce.300ms="search" placeholder="Search beers, breweries or barcode..." />
+                    <x-barcode-scanner label="" />
+                </div>
                 <div class="flex items-center gap-2">
                     <div class="flex-1 sm:flex-none sm:w-40">
                         <x-custom-select :options="array_merge(['' => 'All Styles'], array_combine($styles, $styles))" wireModel="style" placeholder="All Styles" />
