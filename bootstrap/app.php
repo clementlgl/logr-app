@@ -15,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\EnsureAppInstalled::class,
         ]);
 
+        // Behind a reverse proxy (e.g. Caddy terminating TLS): TRUSTED_PROXIES=* or a comma-separated list of IPs
+        if ($proxies = env('TRUSTED_PROXIES')) {
+            $middleware->trustProxies(at: $proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)));
+        }
+
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureAdmin::class,
         ]);
