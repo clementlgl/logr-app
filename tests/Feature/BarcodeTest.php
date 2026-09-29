@@ -18,6 +18,14 @@ class BarcodeTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Keep barcode lookups off the real LogrDB
+        config(['services.logr.pub_url' => null]);
+    }
+
     private function fakeOpenFoodFacts(): void
     {
         Http::fake([
@@ -70,6 +78,7 @@ class BarcodeTest extends TestCase
             ->assertSet('abv', 5.5)
             ->assertSet('style', ['Lager'])
             ->assertSet('brewerySearch', 'Kronenbourg')
+            ->tap(fn () => $this->assertSame(0, Brewery::count()))
             ->call('save');
 
         $beer = Beer::where('barcode', '3080216052885')->firstOrFail();
@@ -77,6 +86,78 @@ class BarcodeTest extends TestCase
         $this->assertSame('Kronenbourg', $beer->brewery->name);
         $this->assertNotNull($beer->photo_path);
         Storage::disk('public')->assertExists($beer->photo_path);
+    }
+
+    public function test_lookup_searches_beer_databases_and_import_completes_details(): void
+    {
+        $this->fakeOpenFoodFacts();
+        Http::fake([
+            'api.catalog.beer/beer/search*' => Http::response(['data' => [[
+                'id' => 'cb-1664',
+                'name' => '1664 Blanc',
+                'style' => 'Witbier',
+                'abv' => null,
+                'ibu' => 12,
+                'brewer' => ['name' => 'Brasseries Kronenbourg'],
+            ]]]),
+        ]);
+        config(['services.catalog_beer.key' => 'test-key']);
+        $user = User::factory()->create();
+
+        Livewire::actingAs($user)
+            ->test(BeerForm::class)
+            ->call('scanBarcode', '3080216052885')
+            ->assertSet('showBeerDropdown', true)
+            ->assertCount('beerResults.api', 1)
+            ->call('importBeer', 'cb-1664')
+            ->assertSet('name', '1664 Blanc')
+            ->assertSet('style', ['Witbier'])
+            ->assertSet('ibu', 12)
+            ->assertSet('abv', 5.5)
+            ->assertSet('description', 'Bière blonde')
+            ->assertSet('brewerySearch', 'Brasseries Kronenbourg')
+            ->call('save');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'api.catalog.beer/beer/search')
+            && $request['q'] === 'Kronenbourg 1664');
+
+        $beer = Beer::where('barcode', '3080216052885')->firstOrFail();
+        $this->assertSame('Brasseries Kronenbourg', $beer->brewery->name);
+        $this->assertSame(['Brasseries Kronenbourg'], Brewery::pluck('name')->all());
+    }
+
+    public function test_scan_can_link_barcode_to_existing_beer(): void
+    {
+        $this->fakeOpenFoodFacts();
+        $user = User::factory()->create();
+        $beer = Beer::create(['name' => '1664']);
+
+        Livewire::actingAs($user)
+            ->test(BeerForm::class)
+            ->call('scanBarcode', '3080216052885')
+            ->assertSet('showBeerDropdown', true)
+            ->assertSee('Link barcode')
+            ->call('linkBarcodeToBeer', $beer->id)
+            ->assertRedirect(route('beers.show', $beer));
+
+        $this->assertSame('3080216052885', $beer->fresh()->barcode);
+        $this->assertSame(1, Beer::count());
+        $this->assertSame(0, Brewery::count());
+    }
+
+    public function test_changing_brewery_field_drops_open_food_facts_brewery(): void
+    {
+        $this->fakeOpenFoodFacts();
+        $user = User::factory()->create();
+
+        Livewire::actingAs($user)
+            ->test(BeerForm::class)
+            ->call('scanBarcode', '3080216052885')
+            ->set('brewerySearch', 'Something else')
+            ->call('save');
+
+        $this->assertNull(Beer::where('barcode', '3080216052885')->value('brewery_id'));
+        $this->assertSame(0, Brewery::count());
     }
 
     public function test_lookup_reuses_existing_brewery_and_keeps_typed_name(): void

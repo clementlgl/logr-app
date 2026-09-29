@@ -58,6 +58,9 @@ class BeerForm extends Component
 
     public string $barcodeStatus = '';
 
+    // Brewery name from Open Food Facts, only created on save if nothing better was picked
+    public ?string $barcodeBreweryName = null;
+
     // Inventory (add form only)
     public bool $addToInventory = false;
 
@@ -177,7 +180,7 @@ class BeerForm extends Component
         return $sources;
     }
 
-    private function fetchBeerResults(): array
+    private function fetchBeerResults(?string $apiQuery = null): array
     {
         $source = $this->beerSearchSource;
         $local = [];
@@ -196,13 +199,13 @@ class BeerForm extends Component
         }
 
         $api = ($source !== 'local')
-            ? $this->fetchApiBeerResults($this->beerApiLimit)
+            ? $this->fetchApiBeerResults($this->beerApiLimit, $apiQuery ?? $this->name)
             : [];
 
         return ['local' => $local, 'localTotal' => $localTotal, 'api' => $api];
     }
 
-    private function fetchApiBeerResults(int $limit = 6): array
+    private function fetchApiBeerResults(int $limit, string $query): array
     {
         $user = auth()->user();
         $source = $this->beerSearchSource;
@@ -211,7 +214,7 @@ class BeerForm extends Component
             if ($source === '' || $source === 'pub') {
                 $pub = PubBeerDb::forInstance();
                 if ($pub) {
-                    $results = $pub->searchBeers($this->name, $limit);
+                    $results = $pub->searchBeers($query, $limit);
                     foreach ($results as &$result) {
                         $result['_source'] = 'pub';
                         Cache::put("beer_api_{$result['id']}", array_merge($result, [
@@ -238,7 +241,7 @@ class BeerForm extends Component
                 $untappdSecret = $user->untappd_client_secret ?: config('services.untappd.api_secret');
                 if ($untappdKey && $untappdSecret) {
                     $untappd = new Untappd($untappdKey, $untappdSecret);
-                    $results = $untappd->searchBeers($this->name, $limit);
+                    $results = $untappd->searchBeers($query, $limit);
                     foreach ($results as &$result) {
                         $result['_source'] = 'untappd';
                         Cache::put("beer_api_{$result['bid']}", array_merge($result, ['_source' => 'untappd']), now()->addMinutes(5));
@@ -253,7 +256,7 @@ class BeerForm extends Component
             if ($source === '' || $source === 'catalog') {
                 $catalogKey = $user->catalog_beer_api_key ?: config('services.catalog_beer.key');
                 if ($catalogKey) {
-                    $results = app(CatalogBeer::class)->search($this->name, $limit, $catalogKey);
+                    $results = app(CatalogBeer::class)->search($query, $limit, $catalogKey);
                     foreach ($results as &$result) {
                         $result['_source'] = 'catalog';
                         Cache::put("beer_api_{$result['id']}", array_merge($result, ['_source' => 'catalog']), now()->addMinutes(5));
@@ -266,7 +269,7 @@ class BeerForm extends Component
             return [];
         } catch (\Exception $e) {
             \Log::error('BeerForm: beer search failed', [
-                'query' => $this->name,
+                'query' => $query,
                 'error' => $e->getMessage(),
             ]);
 
@@ -281,11 +284,12 @@ class BeerForm extends Component
             return;
         }
 
+        // Fall back to current values (e.g. from a barcode lookup) when the API result lacks them
         $this->name = $data['name'] ?? '';
-        $this->style = $this->parseApiStyle($data['style'] ?? '');
-        $this->abv = ($data['abv'] ?? null) ? (float) $data['abv'] : null;
-        $this->ibu = ($data['ibu'] ?? null) ? (int) $data['ibu'] : null;
-        $this->description = $data['description'] ?? '';
+        $this->style = $this->parseApiStyle($data['style'] ?? '') ?: $this->style;
+        $this->abv = ($data['abv'] ?? null) ? (float) $data['abv'] : $this->abv;
+        $this->ibu = ($data['ibu'] ?? null) ? (int) $data['ibu'] : $this->ibu;
+        $this->description = ($data['description'] ?? '') ?: $this->description;
 
         // Get brewery data from either format
         $isPub = ($data['_source'] ?? null) === 'pub';
@@ -395,23 +399,56 @@ class BeerForm extends Component
             $this->description = $product['description'];
         }
         if (! $this->brewery_id && $product['brewery_name']) {
-            $brewery = Brewery::where('name', 'like', $product['brewery_name'])->first()
-                ?? Brewery::create(['name' => $product['brewery_name']]);
-            $this->brewery_id = $brewery->id;
-            $this->brewerySearch = $brewery->name;
+            $brewery = Brewery::where('name', 'like', $product['brewery_name'])->first();
+            $this->brewery_id = $brewery?->id;
+            $this->brewerySearch = $brewery->name ?? $product['brewery_name'];
+            $this->barcodeBreweryName = $brewery ? null : $product['brewery_name'];
         }
         if (! $this->beer?->photo_path) {
             $this->barcodeImageUrl = $product['image_url'];
         }
 
-        $this->showBeerDropdown = false;
         $this->barcodeStatus = 'Filled from Open Food Facts. Check the details before saving.';
+
+        if ($this->beer?->exists) {
+            return;
+        }
+
+        // Open Food Facts only knows the product; look for the beer itself (style, IBU, real brewery)
+        $apiQuery = $product['brewery_name'] && ! str_contains(strtolower($product['name']), strtolower($product['brewery_name']))
+            ? "{$product['brewery_name']} {$product['name']}"
+            : $product['name'];
+
+        $this->beerApiLimit = 6;
+        $this->beerResults = $this->fetchBeerResults($apiQuery);
+        if ($this->beerResults['local'] || $this->beerResults['api']) {
+            $this->showBeerDropdown = true;
+            $this->barcodeStatus = 'Filled from Open Food Facts. Pick a match below to complete style, IBU and brewery.';
+        }
+    }
+
+    /**
+     * Attach the scanned barcode to a beer already in the library instead of creating a duplicate.
+     */
+    public function linkBarcodeToBeer(int $id): void
+    {
+        $barcode = OpenFoodFacts::normalizeBarcode($this->barcode);
+        $beer = Beer::find($id);
+        if (! $barcode || ! $beer || Beer::where('barcode', $barcode)->exists()) {
+            return;
+        }
+
+        $beer->update(['barcode' => $barcode]);
+
+        session()->flash('message', 'Barcode linked to this beer.');
+        $this->redirect(route('beers.show', $beer), navigate: true);
     }
 
     public function clearBarcode(): void
     {
         $this->barcode = '';
         $this->barcodeImageUrl = null;
+        $this->barcodeBreweryName = null;
         $this->barcodeStatus = '';
         $this->resetErrorBag('barcode');
     }
@@ -467,6 +504,7 @@ class BeerForm extends Component
             $this->brewery_id = $brewery->id;
             $this->brewerySearch = $brewery->name;
             $this->showBreweryDropdown = false;
+            $this->barcodeBreweryName = null;
         }
     }
 
@@ -587,6 +625,12 @@ class BeerForm extends Component
         ];
 
         $this->barcode = OpenFoodFacts::normalizeBarcode($this->barcode) ?? trim($this->barcode);
+
+        // Create the Open Food Facts brewery only if the field still shows it
+        if (! $this->brewery_id && $this->barcodeBreweryName && $this->brewerySearch === $this->barcodeBreweryName) {
+            $this->brewery_id = (Brewery::where('name', 'like', $this->barcodeBreweryName)->first()
+                ?? Brewery::create(['name' => $this->barcodeBreweryName]))->id;
+        }
 
         $validated = $this->validate($rules, [
             'barcode.regex' => 'Not a valid barcode (8 to 14 digits).',

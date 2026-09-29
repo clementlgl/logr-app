@@ -96,7 +96,7 @@
                                 @if(count($beerResults['local']) > 0 || count($beerResults['api']) > 0)
                                     {{-- Local results --}}
                                     @foreach($beerResults['local'] as $localBeer)
-                                        <button type="button" wire:click="selectExistingBeer({{ $localBeer['id'] }})" @click="open = false" class="w-full text-left px-4 py-2.5 text-sm hover:bg-amber-100 hover:text-amber-800 dark:hover:bg-amber-900/40 dark:hover:text-amber-300 transition-colors flex items-center gap-3">
+                                        <button type="button" wire:click="{{ $barcode && empty($localBeer['barcode']) ? 'linkBarcodeToBeer' : 'selectExistingBeer' }}({{ $localBeer['id'] }})" @click="open = false" class="w-full text-left px-4 py-2.5 text-sm hover:bg-amber-100 hover:text-amber-800 dark:hover:bg-amber-900/40 dark:hover:text-amber-300 transition-colors flex items-center gap-3">
                                             @if($localBeer['photo_path'] ?? null)
                                                 <img src="{{ Storage::url($localBeer['photo_path']) }}" alt="" class="w-8 h-8 rounded object-cover flex-shrink-0" />
                                             @else
@@ -110,7 +110,7 @@
                                                     <span class="text-gray-500 dark:text-gray-400 text-xs block">{{ $localBeer['brewery']['name'] }}</span>
                                                 @endif
                                             </div>
-                                            <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">In Library</span>
+                                            <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ $barcode && empty($localBeer['barcode']) ? 'Link barcode' : 'In Library' }}</span>
                                         </button>
                                     @endforeach
                                     @if($beerResults['localTotal'] > count($beerResults['local']))
